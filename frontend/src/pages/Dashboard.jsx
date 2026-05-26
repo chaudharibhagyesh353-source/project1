@@ -7,10 +7,12 @@ import {
   Trash2, 
   LogOut, 
   Lock, 
-  BookOpen, 
   Calendar, 
   AlertTriangle,
-  FolderOpen
+  FolderOpen,
+  Search,
+  Copy,
+  Check
 } from 'lucide-react';
 import { API_URL } from '../context/AuthContext';
 
@@ -24,8 +26,20 @@ export default function Dashboard() {
   const [body, setBody] = useState('');
   const [formError, setFormError] = useState(null);
 
+  // Local state for search & clipboard copies
+  const [searchQuery, setSearchQuery] = useState('');
+  const [copiedId, setCopiedId] = useState(null);
+  
+  // Local state for alert toasts
+  const [toast, setToast] = useState(null);
+
   // Local state for delete confirmation modal
   const [noteToDelete, setNoteToDelete] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   // 1. React Query: Fetch notes with in-memory decryption
   const { data: notes, isLoading, isError, error } = useQuery({
@@ -65,7 +79,6 @@ export default function Dashboard() {
 
       return decryptedNotes;
     },
-    // Query is only active if we are fully authenticated and have the crypto key
     enabled: !!token && !!cryptoKey,
   });
 
@@ -100,6 +113,7 @@ export default function Dashboard() {
       setTitle('');
       setBody('');
       setFormError(null);
+      showToast('Note created and encrypted successfully!');
       // Invalidate query to trigger refetch
       queryClient.invalidateQueries({ queryKey: ['notes'] });
     },
@@ -126,30 +140,27 @@ export default function Dashboard() {
 
       return response.json();
     },
-    // Optimistic Update Setup
     onMutate: async (noteId) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: ['notes'] });
-
-      // Snapshot previous notes list
       const previousNotes = queryClient.getQueryData(['notes']);
 
-      // Optimistically delete the note from the query cache
+      // Optimistically delete
       queryClient.setQueryData(['notes'], (old) => {
         return old ? old.filter(note => note.id !== noteId) : [];
       });
 
-      // Return context containing previous notes for potential rollback
+      showToast('Deleting note...', 'info');
       return { previousNotes };
     },
-    // If the mutation fails, rollback to cached notes snapshot
     onError: (err, noteId, context) => {
       if (context?.previousNotes) {
         queryClient.setQueryData(['notes'], context.previousNotes);
       }
-      alert(`Deletion failed: ${err.message}. Restoring note.`);
+      showToast(`Deletion failed: ${err.message}`, 'danger');
     },
-    // Always invalidate notes cache to keep in sync with DB
+    onSuccess: () => {
+      showToast('Note deleted successfully!');
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
     }
@@ -174,10 +185,27 @@ export default function Dashboard() {
     }
   };
 
+  const handleCopyNote = (noteId, noteBodyText) => {
+    navigator.clipboard.writeText(noteBodyText);
+    setCopiedId(noteId);
+    setTimeout(() => setCopiedId(null), 2000);
+    showToast('Plaintext note content copied to clipboard.');
+  };
+
   const formatDate = (dateString) => {
     const options = { year: 'numeric', month: 'short', day: 'numeric' };
     return new Date(dateString).toLocaleDateString(undefined, options);
   };
+
+  // Filter notes client-side based on search query
+  const filteredNotes = notes?.filter(note => 
+    note.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    note.body.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Note editor character & word count calculations
+  const charCount = body.length;
+  const wordCount = body.trim() === '' ? 0 : body.trim().split(/\s+/).length;
 
   return (
     <div className="app-container">
@@ -195,6 +223,24 @@ export default function Dashboard() {
           </button>
         </div>
       </nav>
+
+      {/* Floating Action Toast Banner */}
+      {toast && (
+        <div 
+          className={`alert alert-${toast.type === 'danger' ? 'danger' : toast.type === 'info' ? 'secondary' : 'success'}`} 
+          style={{
+            position: 'fixed',
+            top: '80px',
+            right: '24px',
+            zIndex: 1000,
+            maxWidth: '350px',
+            boxShadow: 'var(--shadow-md)',
+            animation: 'scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+          }}
+        >
+          {toast.message}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="dashboard-container">
@@ -233,7 +279,7 @@ export default function Dashboard() {
                   />
                 </div>
 
-                <div className="form-group" style={{ marginBottom: '1.2rem' }}>
+                <div className="form-group" style={{ marginBottom: '0.4rem' }}>
                   <label className="form-label">Content</label>
                   <textarea
                     className="form-textarea"
@@ -243,6 +289,21 @@ export default function Dashboard() {
                     disabled={createNoteMutation.isPending}
                     required
                   ></textarea>
+                </div>
+                
+                {/* Character and Word Counters */}
+                <div 
+                  style={{ 
+                    fontSize: '0.75rem', 
+                    color: 'var(--text-secondary)', 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    marginBottom: '1.2rem',
+                    padding: '0 0.2rem'
+                  }}
+                >
+                  <span>{charCount} characters</span>
+                  <span>{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
                 </div>
 
                 <button 
@@ -269,6 +330,36 @@ export default function Dashboard() {
 
           {/* Notes list Display Area (Right Column) */}
           <section className="notes-section">
+            
+            {/* Search and Filters Bar */}
+            {!isLoading && notes && notes.length > 0 && (
+              <div 
+                style={{ 
+                  position: 'relative', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  marginBottom: '0.5rem' 
+                }}
+              >
+                <Search 
+                  size={18} 
+                  style={{ 
+                    position: 'absolute', 
+                    left: '1rem', 
+                    color: 'var(--text-muted)' 
+                  }} 
+                />
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Search decrypted notes by title or content..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ paddingLeft: '2.8rem' }}
+                />
+              </div>
+            )}
+
             {isLoading && (
               <div className="spinner-container">
                 <div className="spinner"></div>
@@ -290,20 +381,41 @@ export default function Dashboard() {
               </div>
             )}
 
-            {!isLoading && !isError && notes && notes.length > 0 && (
+            {!isLoading && !isError && notes && notes.length > 0 && filteredNotes.length === 0 && (
+              <div className="empty-state" style={{ padding: '3rem 2rem' }}>
+                <Search className="empty-icon" size={36} />
+                <h3>No results match your search</h3>
+                <p>Try refining your search keyword or clear the search input to see all notes.</p>
+              </div>
+            )}
+
+            {!isLoading && !isError && filteredNotes && filteredNotes.length > 0 && (
               <div className="notes-grid">
-                {notes.map((note) => (
+                {filteredNotes.map((note) => (
                   <div key={note.id} className="note-card">
                     <div>
                       <div className="note-header">
                         <h4 className="note-title">{note.title}</h4>
-                        <button 
-                          className="btn-icon" 
-                          onClick={() => setNoteToDelete(note.id)}
-                          title="Delete Note"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.2rem' }}>
+                          {/* Copy to Clipboard Button */}
+                          <button 
+                            className="btn-icon"
+                            onClick={() => handleCopyNote(note.id, note.body)}
+                            title="Copy Decrypted Content"
+                            style={{ color: copiedId === note.id ? '#10b981' : 'var(--text-secondary)' }}
+                          >
+                            {copiedId === note.id ? <Check size={16} /> : <Copy size={16} />}
+                          </button>
+                          
+                          {/* Delete Button */}
+                          <button 
+                            className="btn-icon" 
+                            onClick={() => setNoteToDelete(note.id)}
+                            title="Delete Note"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
                       <p className="note-body">
                         {note.body.length > 150 
@@ -357,3 +469,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

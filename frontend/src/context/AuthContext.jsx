@@ -1,9 +1,9 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { deriveKeyFromPassword } from '../hooks/useCrypto';
+import { deriveKeys } from '../hooks/useCrypto';
 
 const AuthContext = createContext(null);
 
-export const API_URL = 'http://localhost:5001';
+export const API_URL = 'http://localhost:5002';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -47,10 +47,13 @@ export function AuthProvider({ children }) {
   const register = async (email, password) => {
     setError(null);
     try {
+      // Derive keys locally: only send authKey to server, never the raw password
+      const { authKey } = await deriveKeys(password, email);
+      
       const response = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password: authKey }),
       });
       
       const data = await response.json();
@@ -67,10 +70,13 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     setError(null);
     try {
+      // Derive keys locally: get authKey for backend verification, encryptionKey for local notes
+      const { authKey, encryptionKey } = await deriveKeys(password, email);
+      
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password: authKey }),
       });
       
       const data = await response.json();
@@ -78,13 +84,10 @@ export function AuthProvider({ children }) {
         throw new Error(data.error || 'Invalid email or password.');
       }
       
-      // Derive the client-side AES-GCM key in-memory from password
-      const derivedKey = await deriveKeyFromPassword(password, email);
-      
       // Store user, token and key strictly in-memory
       setUser(data.user);
       setToken(data.token);
-      setCryptoKey(derivedKey);
+      setCryptoKey(encryptionKey);
       
       return data;
     } catch (err) {

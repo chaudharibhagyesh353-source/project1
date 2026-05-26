@@ -25,12 +25,13 @@ function base64ToArrayBuffer(base64) {
 }
 
 /**
- * Derives a 256-bit AES-GCM key from a password and email.
+ * Derives both a 256-bit AES-GCM encryption key and a 256-bit server authentication key
+ * from a password and email.
  * @param {string} password The user's password
  * @param {string} email The user's email (used as salt)
- * @returns {Promise<CryptoKey>} Derived AES-GCM key
+ * @returns {Promise<{authKey: string, encryptionKey: CryptoKey}>} Derived keys
  */
-export async function deriveKeyFromPassword(password, email) {
+export async function deriveKeys(password, email) {
   const encoder = new TextEncoder();
   const passwordBytes = encoder.encode(password);
   
@@ -44,11 +45,11 @@ export async function deriveKeyFromPassword(password, email) {
     passwordBytes,
     'PBKDF2',
     false,
-    ['deriveKey']
+    ['deriveBits']
   );
   
-  // Derive the 256-bit AES-GCM encryption key
-  return await window.crypto.subtle.deriveKey(
+  // Derive 512 bits (64 bytes) to split into encryption and auth keys
+  const derivedBits = await window.crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
       salt: saltBuffer,
@@ -56,10 +57,31 @@ export async function deriveKeyFromPassword(password, email) {
       hash: 'SHA-256'
     },
     masterKey,
-    { name: 'AES-GCM', length: 256 },
+    512 // 512 bits = 64 bytes
+  );
+  
+  // Split bits into two 32-byte chunks
+  const encryptionBits = derivedBits.slice(0, 32);
+  const authBits = derivedBits.slice(32, 64);
+  
+  // Import the first 32 bytes as a 256-bit AES-GCM encryption key
+  const encryptionKey = await window.crypto.subtle.importKey(
+    'raw',
+    encryptionBits,
+    'AES-GCM',
     false, // Key is non-extractable (cannot be read via JS)
     ['encrypt', 'decrypt']
   );
+  
+  // Convert the second 32 bytes to a hex string for server authentication
+  const authKeyHex = Array.from(new Uint8Array(authBits))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+    
+  return {
+    authKey: authKeyHex,
+    encryptionKey
+  };
 }
 
 /**
@@ -120,7 +142,7 @@ export async function decryptText(encryptedBodyBase64, ivBase64, cryptoKey) {
  */
 export function useCrypto() {
   return {
-    deriveKeyFromPassword,
+    deriveKeys,
     encryptText,
     decryptText
   };
