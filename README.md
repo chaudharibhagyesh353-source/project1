@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # SecureVault - Encrypted Notes Application
 
 SecureVault is a secure, full-stack personal notes application. It implements **Zero-Knowledge double-layer encryption** using AES-256-GCM. 
@@ -74,3 +75,6 @@ It defends against **active tampering and injection attacks**. If an attacker ta
 ### 4. One known weakness & fix
 * **Weakness**: We send the raw user password over the network to `/auth/login` to authenticate. If the server is compromised or HTTPS is misconfigured, the password is leaked, compromising both the account and the client-side encryption key (since the key is derived from the password).
 * **Fix**: Implement a **Zero-Knowledge password verification protocol** like **SRP (Secure Remote Password)**, or derive two separate keys in the browser: one for authentication (e.g., `PBKDF2(password, email, 100000, 'SHA-256')` hashed) sent to the server to check login, and a distinct key derived with a different salt or parameters kept strictly local to encrypt notes. This ensures the server never receives a value that can reconstruct the local encryption key.
+=======
+# project1
+>>>>>>> ae4857bbad09ff87f476e33ab3a12f6d5efa205e
